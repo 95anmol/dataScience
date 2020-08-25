@@ -1,0 +1,492 @@
+--               The New York Taxi and Limousine Commission [TLC] Hive Analysis
+-- The dataset contains the trip details made by taxis months of November and December 2017 in New York City.
+ --3 steps that will be followed are mentioned below.
+--Step 1: Data Quality Check and EDA
+--Step 2: Analysis Level-1
+--Step 3: Analysis Level-2
+ -- Set parameters
+SET hive.exec.dynamic.partition = TRUE;
+
+
+SET hive.exec.max.dynamic.partitions=100000;
+
+
+SET hive.exec.max.dynamic.partitions.pernode=100000;
+
+-- create table
+
+DROP TABLE yellow_tripdata_2017_anmol;
+
+
+CREATE EXTERNAL TABLE IF NOT EXISTS yellow_tripdata_2017_anmol ( vendorid int, tpep_pickup_datetime TIMESTAMP,
+                                                                                                    tpep_dropoff_datetime TIMESTAMP,
+                                                                                                                          passenger_count int, trip_distance DOUBLE,
+                                                                                                                                                             ratecodeid int, store_and_fwd_flag string,
+                                                                                                                                                                             pulocationid int, dolocationid int, payment_type int, fare_amount DOUBLE,
+                                                                                                                                                                                                                                               extra DOUBLE,
+                                                                                                                                                                                                                                                     mta_tax DOUBLE,
+                                                                                                                                                                                                                                                             tip_amount DOUBLE,
+                                                                                                                                                                                                                                                                        tolls_amount DOUBLE,
+                                                                                                                                                                                                                                                                                     improvement_surcharge DOUBLE,
+                                                                                                                                                                                                                                                                                                           total_amount DOUBLE) ROW FORMAT DELIMITED FIELDS TERMINATED BY ',' LOCATION '/common_folder/nyc_taxi_data' tblproperties ("skip.header.line.count"="1");
+
+-- Stage 1: Data Quality Check and EDA
+-- Check Data
+
+SELECT *
+FROM yellow_tripdata_2017_anmol
+LIMIT 100;
+
+DESC yellow_tripdata_2017_anmol;
+
+-- Basic Data Quality Checks
+-- All speeds are in mph
+ -- Q1. How many records has each TPEP provider provided? Write a query that summarises the number of records of each provider.
+--     Query:
+
+SELECT vendorid AS Vendor_Id,
+       count(*) AS Num_Records
+FROM yellow_tripdata_2017_anmol
+GROUP BY vendorid;
+
+--     Result: vendorId num_records
+ --   2( VeriFone Inc)        647183
+ --   1(Creative Mobile Technologies, LLC)        527386
+ -- Q2. The data provided is for months November and December only. Check whether the data is consistent, and if not, identify the data quality issues.
+--     Mention all data quality issues in comments.
+-- Check columns:
+-- check timings
+
+SELECT year(tpep_pickup_datetime)AS Pickup_Year,
+       month(tpep_pickup_datetime)AS Pickup_Month,
+       year(tpep_dropoff_datetime) AS Dropoff_Year,
+       month(tpep_dropoff_datetime) AS Dropoff_Month,
+       count(*)AS Num_Records
+FROM yellow_tripdata_2017_anmol
+GROUP BY year(tpep_pickup_datetime),
+         month(tpep_pickup_datetime),
+         year(tpep_dropoff_datetime),
+         month(tpep_dropoff_datetime)
+ORDER BY Pickup_Year,
+         Pickup_Month,
+         Dropoff_Year,
+         Dropoff_Month;
+
+--   we can see that there exists many records(121) which shows inconsistencies in pick and drop time=ings
+ -- check rate code
+
+SELECT ratecodeid,
+       count(*) AS Num_Records
+FROM yellow_tripdata_2017_anmol
+GROUP BY ratecodeid
+ORDER BY ratecodeid;
+
+--  We have 9 records with '99' rate code id which are invalid
+ -- check extra amount charged
+
+SELECT extra,
+       count(*) AS Num_Records
+FROM yellow_tripdata_2017_anmol
+GROUP BY extra
+ORDER BY extra;
+
+--   We have 93 entries with negetive values
+ -- check mta tax
+
+SELECT mta_tax AS MTA_Tax,
+       count(*) AS Num_Records
+FROM yellow_tripdata_2017_anmol
+GROUP BY mta_tax;
+
+-- We have 549 values with discrepemcies
+ -- check tip amount
+
+SELECT tip_amount,
+       count(*) AS Num_Records
+FROM yellow_tripdata_2017_anmol
+WHERE payment_type=2
+  AND tip_amount!= 0
+GROUP BY tip_amount
+ORDER BY tip_amount;
+
+--  No problem here
+ --  Check for Invalids
+
+SELECT SUM(CASE
+               WHEN vendorid IS NULL THEN 1
+               ELSE 0
+           END) AS VendorID_IS_Blank,
+       SUM(CASE
+               WHEN tpep_pickup_datetime IS NULL THEN 1
+               ELSE 0
+           END) AS PUTime_IS_Blank,
+       SUM(CASE
+               WHEN tpep_dropoff_datetime IS NULL THEN 1
+               ELSE 0
+           END) AS DOTime_IS_Blank,
+       SUM(CASE
+               WHEN pulocationid IS NULL THEN 1
+               ELSE 0
+           END) AS pulocationid_IS_Blank,
+       SUM(CASE
+               WHEN dolocationid IS NULL THEN 1
+               ELSE 0
+           END) AS dolocationid_IS_Blank,
+       SUM(CASE
+               WHEN payment_type IS NULL THEN 1
+               ELSE 0
+           END) AS payment_type_IS_Blank,
+       SUM(CASE
+               WHEN ratecodeid IS NULL THEN 1
+               ELSE 0
+           END) AS ratecodeid_IS_Blank,
+       SUM(CASE
+               WHEN store_and_fwd_flag IS NULL THEN 1
+               ELSE 0
+           END) AS store_and_fwd_flag_IS_Blank,
+       SUM(CASE
+               WHEN passenger_count <= 0 THEN 1
+               ELSE 0
+           END) AS passenger_count_IS_invalid,
+       SUM(CASE
+               WHEN trip_distance <= 0 THEN 1
+               ELSE 0
+           END) AS trip_distance_IS_Invalid,
+       SUM(CASE
+               WHEN fare_amount <= 0 THEN 1
+               ELSE 0
+           END) AS fare_amount_is_Invalid,
+       SUM(CASE
+               WHEN extra < 0 THEN 1
+               ELSE 0
+           END) AS extra_is_Invalid,
+       SUM(CASE
+               WHEN mta_tax < 0 THEN 1
+               ELSE 0
+           END) AS mta_tax_is_Invalid,
+       SUM(CASE
+               WHEN tip_amount < 0 THEN 1
+               ELSE 0
+           END) AS tip_amount_is_Invalid,
+       SUM(CASE
+               WHEN tolls_amount < 0 THEN 1
+               ELSE 0
+           END) AS tolls_amount_is_Invalid,
+       SUM(CASE
+               WHEN improvement_surcharge < 0 THEN 1
+               ELSE 0
+           END) AS improvement_surcharge_is_Invalid,
+       SUM(CASE
+               WHEN total_amount <= 0 THEN 1
+               ELSE 0
+           END) AS total_amount_is_Invalid
+FROM yellow_tripdata_2017_anmol
+WHERE vendorid IS NULL
+  OR tpep_pickup_datetime IS NULL
+  OR tpep_dropoff_datetime IS NULL
+  OR passenger_count <= 0
+  OR trip_distance <= 0
+  OR ratecodeid IS NULL
+  OR store_and_fwd_flag IS NULL
+  OR pulocationid IS NULL
+  OR dolocationid IS NULL
+  OR payment_type IS NULL
+  OR fare_amount <= 0
+  OR extra < 0
+  OR mta_tax < 0
+  OR tip_amount < 0
+  OR tolls_amount < 0
+  OR improvement_surcharge < 0
+  OR total_amount <= 0;
+
+-- Following columns have problems
+-- passenger_count_is_invalid	trip_distance_is_invalid	fare_amount_is_invalid	extra_is_invalid
+-- mta_tax_is_invalid	tip_amount_is_invalid	tolls_amount_is_invalid	improvement_surcharge_is_invalid	total_amount_is_invalid
+ -- Q3. You might have encountered unusual or erroneous rows in the dataset. Can you conclude which vendor is doing a bad job in providing the records
+--     using different columns of the dataset. Summarise your conclusions based on every column where these errors are present. For example,
+--     There are unusual passenger count, i.e. 0 which is unusual.
+-- Query:
+
+SELECT vendorid,
+       count(*) AS error
+FROM yellow_tripdata_2017_anmol
+WHERE vendorid IS NULL
+  OR tpep_pickup_datetime IS NULL
+  OR tpep_dropoff_datetime IS NULL
+  OR year(tpep_pickup_datetime) !=2017
+  OR month(tpep_pickup_datetime) NOT IN (11,
+                                         12)
+  OR year(tpep_dropoff_datetime) !=2017
+  OR month(tpep_dropoff_datetime) NOT IN (11,
+                                          12)
+  OR unix_timestamp(tpep_pickup_datetime) > unix_timestamp(tpep_dropoff_datetime)
+  OR passenger_count <= 0
+  OR trip_distance <= 0
+  OR ratecodeid IS NULL
+  OR store_and_fwd_flag IS NULL
+  OR pulocationid IS NULL
+  OR dolocationid IS NULL
+  OR payment_type IS NULL
+  OR fare_amount <= 0
+  OR extra < 0
+  OR mta_tax < 0
+  OR tip_amount < 0
+  OR tolls_amount < 0
+  OR improvement_surcharge < 0
+  OR total_amount <= 0
+  group by vendorid
+  order by vendorid;
+
+-- Result
+ -- group by vendorid;
+ -- vendorid error
+ -- 2        3752
+ -- 1        11183
+--  Clearly vendorId 1 ie. Creative Mobile Technologies, LLC is doing a bad job in providing the records
+ -- Step2:
+-- Analysis-I
+ --  create a new orc table with snappy compression to query faster
+
+CREATE EXTERNAL TABLE IF NOT EXISTS orc_yellow_tripdata_2017_anmol (vendorid int, tpep_pickup_datetime string,
+                                                                                  tpep_dropoff_datetime string,
+                                                                                  passenger_count int, trip_distance DOUBLE,
+                                                                                                                     ratecodeid int, store_and_fwd_flag string,
+                                                                                                                                     pulocationid int, dolocationid int, payment_type int, fare_amount DOUBLE,
+                                                                                                                                                                                                       extra DOUBLE,
+                                                                                                                                                                                                             mta_tax DOUBLE,
+                                                                                                                                                                                                                     tip_amount DOUBLE,
+                                                                                                                                                                                                                                tolls_amount DOUBLE,
+                                                                                                                                                                                                                                             improvement_surcharge DOUBLE,
+                                                                                                                                                                                                                                                                   total_amount DOUBLE) PARTITIONED BY (mnth int, m_day int) STORED AS orc TBLPROPERTIES ("orc.compress" = "SNAPPY");
+
+-- Insert data
+
+INSERT OVERWRITE TABLE orc_yellow_tripdata_2017_anmol PARTITION(mnth, m_day);
+SELECT vendorid,
+       tpep_pickup_datetime,
+       tpep_dropoff_datetime,
+       passenger_count,
+       trip_distance,
+       ratecodeid,
+       store_and_fwd_flag,
+       pulocationid,
+       dolocationid,
+       payment_type,
+       fare_amount,
+       extra,
+       mta_tax,
+       tip_amount,
+       tolls_amount,
+       improvement_surcharge,
+       total_amount,
+       month(tpep_pickup_datetime)AS mnth,
+       day(tpep_pickup_datetime)AS m_day
+FROM yellow_tripdata_2017_anmol
+WHERE year(tpep_pickup_datetime)=2017
+  AND month(tpep_pickup_datetime) IN (11,
+                                      12)
+  AND year(tpep_dropoff_datetime)=2017
+  AND month(tpep_dropoff_datetime) IN (11,
+                                       12)
+  AND unix_timestamp(tpep_pickup_datetime) < unix_timestamp(tpep_dropoff_datetime)
+  AND passenger_count IN(1,
+                         2,
+                         3,
+                         4,
+                         5,
+                         6)
+  AND trip_distance > 0.0
+  AND ratecodeid IN(1,
+                    2,
+                    3,
+                    4,
+                    5,
+                    6)
+  AND payment_type IN (1,
+                       2,
+                       3,
+                       4,
+                       5,
+                       6)
+  AND fare_amount > 0
+  AND extra IN (0,
+                0.5,
+                1)
+  AND mta_tax IN(0,
+                 0.5)
+  AND tip_amount>=0.0
+  AND tolls_amount >= 0.0
+  AND improvement_surcharge IN (0,
+                                0.3)
+  AND total_amount > 0;
+
+-- Q1. Compare the overall average fare per trip for November and December.
+
+SELECT mnth AS Month_of_Year,
+       round(avg(fare_charge),2)AS Average_Fare_Charge
+FROM orc_yellow_tripdata_2017_anmol
+GROUP BY mnth
+ORDER BY mnth;
+
+-- November avg fare : 12.91$
+-- December avg fare : 12.7 $
+-- november's avg is more by 0.21$
+ -- Q2. Explore the ‘number of passengers per trip’ - how many trips are made by each level of ‘Passenger_count’?Do most people travel solo or with other people?
+
+SELECT passenger_count AS Num_of_Passengers,
+       count(*)AS Num_Records
+FROM orc_yellow_tripdata_2017_anmol
+GROUP BY passenger_count;
+
+--  num_of_passengers	num_records
+-- 	1	816970
+-- 	2	174766
+-- 	3	50177
+-- 	4	24679
+-- 	5	54026
+-- 	6	32877
+
+SELECT sum(CASE
+               WHEN passenger_count = 1 THEN 1
+               ELSE 0
+           END)AS solo_trip,
+       sum(CASE
+               WHEN passenger_count != 1 THEN 1
+               ELSE 0
+           END)AS group_trip
+FROM orc_yellow_tripdata_2017_anmol;
+
+-- solo_trip	group_trip
+--  816970	    336525
+--  Clearly most people travel solo
+ -- Q3.  Which is the most preferred mode of payment?
+
+SELECT payment_type AS Payment_Mode,
+       count(*) AS Num_Records
+FROM orc_yellow_tripdata_2017_anmol
+GROUP BY payment_type
+ORDER BY Num_Records DESC;
+
+-- payment_mode	num_records
+-- 	1	        779093
+-- 	2       	368611
+-- 	3       	4491
+-- 	4       	1300
+-- Credit card is most preferred one
+ -- Q4.  What is the average tip paid per trip? Compare the average tip with the 25th, 50th and 75th percentiles and comment whether the ‘average tip’ is a representative statistic (of the central tendency) of ‘tip amount paid’. Hint: You may use percentile_approx(DOUBLE col, p): Returns an approximate pth percentile of a numeric column (including floating point types) in the group.
+-- Cash are to excluded here
+
+SELECT round(avg(tip_amount),3) AS Average_Tip,
+       round(percentile_approx(tip_amount,0.25),3)AS 25th_Percentile,
+       round(percentile_approx(tip_amount, 0.50),3)AS 50th_Percentile,
+       round(percentile_approx(tip_amount, 0.75),3)AS 75th_Percentile
+FROM orc_yellow_tripdata_2017_anmol
+WHERE payment_type != 2;
+
+-- average_tip	25th_percentile	50th_percentile	75th_percentile
+-- 2.683   	1.341	            1.995	            3.046
+--  avg tip is 0.668 ~ 0.7$ more than 50th percitile tip. This means avg tip does not represent central tendency as it is skewed towards right which might be becuase of higher tips
+ -- Q5.  Explore the ‘Extra’ (charge) variable - what fraction of total trips have an extra charge is levied?
+
+SELECT extra_charge,
+       count(*)AS Num_Records
+FROM orc_yellow_tripdata_2017_anmol
+GROUP BY extra_charge;
+
+--     extra_charge	num_records
+-- 	0	            621234
+-- 	0.5         	359747
+-- 	1	            172514
+
+SELECT round(sum(CASE
+                     WHEN extra_charge != 0 THEN 1
+                     ELSE 0
+                 END)/count(*),5) AS fraction
+FROM orc_yellow_tripdata_2017_anmol;
+
+-- ~46% trip amount have extra amount
+ -- Step 3
+-- Analysis-II
+ -- Q1. What is the correlation between the number of passengers on any given trip, and the tip paid per trip? Do multiple travellers tip more compared to solo travellers? Hint: Use CORR(Col_1, Col_2)
+
+SELECT corr(passenger_count, tip_amount)AS corr_pascount_tip,
+       avg(CASE
+               WHEN passenger_count=1 THEN tip_amount
+               ELSE NULL
+           END) AS solo_trip,
+       avg(CASE
+               WHEN passenger_count != 1 THEN tip_amount
+               ELSE NULL
+           END) AS group_tip
+FROM orc_yellow_tripdata_2017_anmol
+WHERE payment_type != 2;
+
+-- corr_pascount_tip	    solo_trip	        group_tip
+-- 0.009	                2.660           	2.740
+-- correlation between the number of passengers on any given trip, and the tip paid per trip is very weak. Trips with more than 1 person tends to have more tip amount
+ -- Q2. Segregate the data into five segments of ‘tip paid’: [0-5), [5-10), [10-15) , [15-20) and >=20. Calculate the percentage share of each bucket (i.e. the fraction of trips falling in each bucket).
+
+SELECT 100*sum(CASE
+                   WHEN tip_amount >= 0
+                        AND tip_amount < 5 THEN 1
+                   ELSE 0
+               END) / count(*) AS 0to5_bucket,
+       100*sum(CASE
+                   WHEN tip_amount >= 5
+                        AND tip_amount < 10 THEN 1
+                   ELSE 0
+               END) / count(*) AS 5to10_bucket,
+       100*sum(CASE
+                   WHEN tip_amount >= 10
+                        AND tip_amount < 15 THEN 1
+                   ELSE 0
+               END) / count(*) AS 10to15_bucket,
+       100*sum(CASE
+                   WHEN tip_amount >= 15
+                        AND tip_amount < 20 THEN 1
+                   ELSE 0
+               END) / count(*) AS 15to20_bucket,
+       100*sum(CASE
+                   WHEN tip_amount >= 20 THEN 1
+                   ELSE 0
+               END) / count(*) AS 20andAbove_bucket
+FROM orc_yellow_tripdata_2017_anmol;
+
+--  0to5_bucket	5to10_bucket	10to15_bucket	15to20_bucket	20andabove_bucket
+-- 	92.4%   	5.6%	        1.68%	        0.18%       	0.088%
+ -- Q3. Which month has a greater average ‘speed’ - November or December? Note that the variable ‘speed’ will have to be derived from other metrics. Hint: You have columns for distance and time.
+
+SELECT round(avg(CASE
+                     WHEN mnth=11 THEN (trip_distance/((unix_timestamp(tpep_dropoff_timestamp)-unix_timestamp(tpep_pickup_timestamp))/3600))
+                     ELSE NULL
+                 END),3)AS nov_avg_speed,
+       round(avg(CASE
+                     WHEN mnth=12 THEN (trip_distance/((unix_timestamp(tpep_dropoff_timestamp)-unix_timestamp(tpep_pickup_timestamp))/3600))
+                     ELSE NULL
+                 END),3)AS dec_avg_speed
+FROM orc_yellow_tripdata_2017_anmol;
+
+-- nov_avg_speed	dec_avg_speed
+-- 10.966       	11.065
+-- Dec has greater speed avg
+ -- Q4. Analyse the average speed of the most happening days of the year, i.e. 31st December (New year’s eve) and 25th December (Christmas) and compare it with the overall average.
+
+SELECT round(avg(CASE
+                     WHEN mnth=12
+                          AND m_day=25 THEN (trip_distance/((unix_timestamp(tpep_dropoff_timestamp)-unix_timestamp(tpep_pickup_timestamp))/3600))
+                     ELSE NULL
+                 END),3)AS 25th_avgSpeed,
+       round(avg(CASE
+                     WHEN mnth=12
+                          AND m_day=31 THEN (trip_distance/((unix_timestamp(tpep_dropoff_timestamp)-unix_timestamp(tpep_pickup_timestamp))/3600))
+                     ELSE NULL
+                 END),3)AS 31st_avgSpeed,
+       round(avg(CASE
+                     WHEN mnth IN (11,12) THEN (trip_distance/((unix_timestamp(tpep_dropoff_timestamp)-unix_timestamp(tpep_pickup_timestamp))/3600))
+                     ELSE NULL
+                 END),3)AS avg_speed
+FROM orc_yellow_tripdata_2017_anmol;
+
+-- 25th_avgspeed	31st_avgspeed	avg_speed
+-- 15.265	        13.269      	11.016
+-- Avg speed on festive days are higher than the usual days. For instance, avg speed on 25th, Christmas is up by 38% from avg speed and avg speed on  31st, New year's eve is by 20.4% from avg speed
